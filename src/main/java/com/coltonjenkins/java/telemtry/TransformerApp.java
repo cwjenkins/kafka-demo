@@ -1,6 +1,7 @@
 package com.coltonjenkins.java.telemtry;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Properties;
 import java.util.concurrent.CountDownLatch;
 
@@ -10,7 +11,6 @@ import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.common.serialization.Serializer;
-import org.apache.kafka.common.utils.Bytes;
 
 import static org.apache.kafka.common.serialization.Serdes.String;
 import static org.apache.kafka.common.serialization.Serdes.Integer;
@@ -20,7 +20,7 @@ import org.apache.kafka.streams.StreamsConfig;
 import org.apache.kafka.streams.kstream.Grouped;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Materialized;
-import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.kstream.SlidingWindows;
 
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -47,14 +47,15 @@ public class TransformerApp
         KStream<String, Integer> s = builder.stream(SOURCE);
 
         s.groupByKey(Grouped.with(String(), Integer()))
+        .windowedBy(SlidingWindows.withTimeDifferenceAndGrace(Duration.ofSeconds(1), Duration.ofSeconds(1)))
         .aggregate(() -> new CountAndSum(0,0), 
                    (key, value, agg) -> {
                         agg.count++;
                         agg.sum += value;
                         log.info("SUM: " + agg.sum);
                         return agg;
-                   }, Materialized.<String, CountAndSum, KeyValueStore<Bytes, byte[]>>as("agg-store").withValueSerde(new CountAndSumSerde()))
-        .mapValues(countAndSum -> countAndSum.sum/countAndSum.count, Materialized.<String, Integer, KeyValueStore<Bytes, byte[]>>as("avg-store"))
+                   }, Materialized.with(Serdes.String(), new CountAndSumSerde()))
+        .mapValues(countAndSum -> countAndSum.sum/countAndSum.count)
         .toStream()
         .to(TO);
 
